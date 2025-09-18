@@ -2,6 +2,16 @@ from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import List
 
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[2]        # root progetto (Backend/)
+STORAGE_DIR = BASE_DIR / "app" / "storage"
+DATASETS_DIR = STORAGE_DIR / "datasets"
+DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+
+DEFAULT_USER = "default"  # per ora un solo utente
+
+
 class Settings(BaseSettings):
     APP_NAME: str = "DF Classifier API"
     APP_ENV: str = "local"

@@ -6,6 +6,70 @@ from app.utils.datetime_detect import coerce_datetime_inplace, detect_datetime_c
 from app.utils.categorize import categorize_columns
 from app.storage.memory_store import save_dataset
 
+# --- in cima al file ---
+CATEGORY_PALETTE = {
+    "numeriche_continue": "#4C78A8",
+    "numeriche_discrete": "#9EC9E6",
+    "categoriche":        "#F58518",
+    "boolean":            "#54A24B",
+    "datetime":           "#B279A2",
+    "testo_libero":       "#E45756",
+    "long_text_nlp":      "#72B7B2",
+    "unknown":            "#BAB0AC",
+}
+
+def _dtype_name(s) -> str:
+    try:
+        return str(s.dtype)
+    except Exception:
+        return "unknown"
+
+def _sample_values(series, n=6):
+    try:
+        vals = series.dropna().astype(str).unique()[:n]
+        return [str(v) for v in vals.tolist()]
+    except Exception:
+        return None
+
+def schema_to_columns_list(schema: dict, df: pd.DataFrame) -> list[dict]:
+    """
+    Converte lo schema (dict) in una lista di colonne:
+    [{name, category, dtype, sample_values}, ...]
+    """
+    cols = []
+    # map col -> category
+    cat_map = {}
+
+    for c in schema.get("numeriche_continue", []): cat_map[c] = "numeriche_continue"
+    for c in schema.get("numeriche_discrete", []): cat_map[c] = "numeriche_discrete"
+    for c in schema.get("boolean", []):            cat_map[c] = "boolean"
+    for c in schema.get("datetime", []):           cat_map[c] = "datetime"
+    for c in schema.get("testo_libero", []):       cat_map[c] = "testo_libero"
+    for c in schema.get("long_text_nlp", {}).keys(): cat_map[c] = "long_text_nlp"
+    for c in schema.get("categoriche", {}).keys():   cat_map[c] = "categoriche"
+
+    for name in df.columns:
+        category = cat_map.get(name, "unknown")
+        dtype = _dtype_name(df[name])
+        if category == "categoriche":
+            info = schema["categoriche"].get(name, {})
+            sample = info.get("values")  # già pronto se non troncato
+            if sample is None:  # se troncato, prendo qualche valore dal df
+                sample = _sample_values(df[name], n=6)
+        elif category == "long_text_nlp":
+            sample = None
+        else:
+            sample = _sample_values(df[name], n=6)
+
+        cols.append({
+            "name": name,
+            "category": category,
+            "dtype": dtype,
+            "sample_values": sample
+        })
+    return cols
+
+
 def classify_file(filename: str, content: bytes,
                   delimiter=None, decimal=None, encoding=None,
                   dayfirst: bool | None = None,
@@ -36,6 +100,9 @@ def classify_file(filename: str, content: bytes,
         auto_parse_dates=auto_parse_dates
     )
 
+    columns = schema_to_columns_list(schema, df)   # <-- NEW
+
+
     warnings: List[str] = []
     for col, cfg in schema.get("categoriche", {}).items():
         if bool(cfg.get("truncated")):
@@ -44,15 +111,17 @@ def classify_file(filename: str, content: bytes,
     dataset_id = save_dataset(df)
 
     return {
-        "dataset_id": dataset_id,
-        "schema": schema,
-        "meta": {
-            "rows": rows,
-            "cols": cols,
-            "format": meta["format"],
-            "encoding_used": meta["encoding_used"],
-            "converted_datetime_cols": converted,
-            "datetime_parse_rate": after_rates
-        },
-        "warnings": warnings
-    }
+    "dataset_id": dataset_id,
+    "schema": schema,
+    "columns": columns,                  # <-- NEW
+    "palette": CATEGORY_PALETTE,         # <-- NEW
+    "meta": {
+        "rows": rows,
+        "cols": cols,
+        "format": meta["format"],
+        "encoding_used": meta["encoding_used"],
+        "converted_datetime_cols": converted,
+        "datetime_parse_rate": after_rates
+    },
+    "warnings": warnings
+}
