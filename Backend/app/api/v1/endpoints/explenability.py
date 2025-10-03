@@ -1,16 +1,19 @@
 # app/api/v1/explainability.py
 from fastapi import APIRouter, HTTPException, Path
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, conlist, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, List, Optional
 from openai import OpenAI
 import os
 
-router = APIRouter(tags=["datasets"], prefix="/v1")
+router = APIRouter(tags=["generative_chat"], prefix="/v1")
 
 # Config modello (override con env var MODEL_NAME)
-MODEL_NAME = os.getenv("MODEL_NAME", "llama3.1")
-client = OpenAI()
+MODEL_NAME = os.getenv("MODEL_NAME", "llama-4-instruct")
+# Se usi un endpoint OpenAI-compatible (es. Ollama/vLLM/Provider), puoi impostare:
+# client = OpenAI(base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:11434/v1"),
+#                 api_key=os.getenv("OPENAI_API_KEY", "local"))
+client = OpenAI(api_key="local")
 
 # ----------------------------
 # Pydantic Schemas
@@ -36,7 +39,8 @@ class ColumnMeta(BaseModel):
 
 class DatasetContext(BaseModel):
     description: str = Field(..., description="Descrizione in linguaggio naturale del dataset e del caso d’uso")
-    columns: conlist(ColumnMeta, min_items=1) = Field(..., description="Metadati delle colonne")
+    # Sostituito conlist -> lista tipizzata + vincolo min_items via Field
+    columns: List[ColumnMeta] = Field(..., min_items=1, description="Metadati delle colonne")
 
     @field_validator("description")
     def description_not_empty(cls, v):
@@ -46,7 +50,8 @@ class DatasetContext(BaseModel):
 
 class ColumnExplainRequest(BaseModel):
     description: str = Field(..., description="Descrizione del dataset/caso d’uso")
-    columns: conlist(ColumnMeta, min_items=1) = Field(..., description="Metadati delle colonne")
+    # Sostituito conlist -> lista tipizzata + vincolo min_items via Field
+    columns: List[ColumnMeta] = Field(..., min_items=1, description="Metadati delle colonne")
     objective: Optional[str] = Field(None, description="Obiettivo analitico (es. previsione, classificazione, profiling)")
     selected_filters: Optional[Dict[str, Any]] = Field(None, description="Eventuali filtri utente correnti")
     target: Optional[str] = Field(None, description="Nome della colonna target, se presente")
@@ -77,7 +82,7 @@ Rispondi in italiano.
 def build_general_messages(ctx: DatasetContext) -> List[Dict[str, str]]:
     user_payload = {
         "description": ctx.description,
-        "columns": [c.dict() for c in ctx.columns],
+        "columns": [c.model_dump() for c in ctx.columns],
     }
     return [
         {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
@@ -96,7 +101,7 @@ def build_column_messages(column_name: str, req: ColumnExplainRequest) -> List[D
         "objective": req.objective,
         "target": req.target,
         "selected_filters": req.selected_filters,
-        "columns": [c.dict() for c in req.columns],
+        "columns": [c.model_dump() for c in req.columns],
         "focus_column": column_name,
     }
     return [
@@ -113,7 +118,6 @@ def build_column_messages(column_name: str, req: ColumnExplainRequest) -> List[D
 
 def call_openai(messages: List[Dict[str, str]]) -> Dict[str, Any]:
     try:
-        # Puoi usare response_format={"type": "json_object"} se il tuo piano/modello lo supporta
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
@@ -121,7 +125,6 @@ def call_openai(messages: List[Dict[str, str]]) -> Dict[str, Any]:
             response_format={"type": "json_object"},
         )
         content = completion.choices[0].message.content
-        # Il modello restituisce già JSON; FastAPI risponderà come JSONResponse
         return {"explanation": content}
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
@@ -154,7 +157,6 @@ async def explain_column(
     Ritorna una spiegazione specifica per la colonna selezionata, includendo possibili relazioni col target
     e grafici/analisi consigliate in base al contesto e all’obiettivo.
     """
-    # Verifica che la colonna esista nel payload
     col_names = {c.name for c in req.columns}
     if column_name not in col_names:
         raise HTTPException(status_code=400, detail=f"La colonna '{column_name}' non è presente nel payload.")

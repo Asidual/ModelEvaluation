@@ -1,16 +1,12 @@
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
+from pathlib import Path
 from typing import List
 
-from pathlib import Path
+# percorso root del progetto (Backend/)
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-BASE_DIR = Path(__file__).resolve().parents[2]        # root progetto (Backend/)
-STORAGE_DIR = BASE_DIR / "app" / "storage"
-DATASETS_DIR = STORAGE_DIR / "datasets"
-DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-
-DEFAULT_USER = "default"  # per ora un solo utente
-
+DEFAULT_USER = "default"
 
 class Settings(BaseSettings):
     APP_NAME: str = "DF Classifier API"
@@ -19,6 +15,9 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: List[str] = ["csv", "xlsx", "parquet"]
     MAX_UPLOAD_MB: int = 200
     CORS_ORIGINS: List[str] = ["*"]
+
+    # 👇 ROOT dei dataset (NON includere l'utente qui!)
+    DATASETS_BASE_DIR: str = "app/storage/datasets"
 
     @field_validator("ALLOWED_EXTENSIONS", mode="before")
     @classmethod
@@ -34,4 +33,12 @@ class Settings(BaseSettings):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v
 
-settings = Settings()  # carica da .env
+settings = Settings()
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATASETS_BASE_PATH = (BASE_DIR / settings.DATASETS_BASE_DIR).resolve()
+DATASETS_BASE_PATH.mkdir(parents=True, exist_ok=True)
+
+# Alias legacy (così non esplode più chi importa DATASETS_DIR)
+DATASETS_DIR = DATASETS_BASE_PATH
